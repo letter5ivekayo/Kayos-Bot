@@ -809,16 +809,9 @@ async function buildReimbursementsOwedEmbeds(brand, end) {
 
     if (pageEmployees.length) {
       embed.addFields(pageEmployees.map(employee => {
-        const lines = employee.reimbursements
-          .slice()
-          .sort((a, b) => a.ts_epoch - b.ts_epoch)
-          .map(row => {
-            const quantity = row.quantity === 1 ? '' : `${row.quantity} × `;
-            return `• ${quantity}${row.item} — **${fmt(row.amount)}**`;
-          });
         return {
-          name: `${employee.employee} — ${fmt(employee.total)}`.slice(0, 256),
-          value: limitEmbedText(lines),
+          name: employee.employee.slice(0, 256),
+          value: `**Total owed: ${fmt(employee.total)}**`,
           inline: false,
         };
       }));
