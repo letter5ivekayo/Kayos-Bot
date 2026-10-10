@@ -829,6 +829,20 @@ async function buildFinalPayEmbeds(brand, start, end) {
   const commissionRate = commissionRateFor(brand);
   const paycheckRate = paycheckRateFor(brand);
   const employees = groupPayoutsByEmployee(rows, commissionRate, paycheckRate);
+  const reimbursementRows = await storeFor(brand.sheet_id).unpaidReimbursements(brand, end.valueOf());
+  const byEmployee = new Map(employees.map(item => [employeeKey(item.employee), item]));
+  for (const reimbursement of groupReimbursementsByEmployee(reimbursementRows)) {
+    const key = employeeKey(reimbursement.employee);
+    const item = byEmployee.get(key) || {
+      employee: reimbursement.employee, gross: 0, sales: 0, commission: 0, paycheck: 0,
+    };
+    item.reimbursement = reimbursement.total;
+    byEmployee.set(key, item);
+  }
+  employees.splice(0, employees.length, ...[...byEmployee.values()]
+    .map(item => ({ ...item, reimbursement: item.reimbursement || 0,
+      totalPayout: item.paycheck + (item.reimbursement || 0) }))
+    .sort((a, b) => b.totalPayout - a.totalPayout || a.employee.localeCompare(b.employee)));
   const eligibleRows = rows.filter(row => !row.self_invoice);
   const excludedSelfInvoices = rows.length - eligibleRows.length;
   const paidKeys = await storeFor(brand.sheet_id).paidEmployeeKeys(brand, start);
@@ -841,16 +855,20 @@ async function buildFinalPayEmbeds(brand, start, end) {
   const grossTotal = employees.reduce((sum, item) => sum + item.gross, 0);
   const commissionTotal = employees.reduce((sum, item) => sum + item.commission, 0);
   const paycheckTotal = employees.reduce((sum, item) => sum + item.paycheck, 0);
-  const paidCount = employees.filter(item => paidKeys.has(employeeKey(item.employee))).length;
+  const reimbursementTotal = employees.reduce((sum, item) => sum + item.reimbursement, 0);
+  const totalPayout = paycheckTotal + reimbursementTotal;
+  const payrollEmployees = employees.filter(item => item.sales > 0);
+  const paidCount = payrollEmployees.filter(item => paidKeys.has(employeeKey(item.employee))).length;
   const endInclusive = end.subtract(1, 'day');
 
   const payrollEmbeds = pages.map((pageEmployees, pageIndex) => {
     const embed = new EmbedBuilder()
-      .setColor(employees.length > 0 && paidCount === employees.length ? 0x22c55e : (brand.embed_color || 0x7d3fd6))
+      .setColor(employees.length > 0 && paidCount === payrollEmployees.length && reimbursementTotal === 0 ? 0x22c55e : (brand.embed_color || 0x7d3fd6))
       .setTitle(`${brand.name} Payroll • ${start.format('MMM D')}–${endInclusive.format('MMM D')}`)
       .setDescription(
-        `💵 **Payroll ${fmt(paycheckTotal)}**  •  ` +
-        `**${paidCount} of ${employees.length} paid**\n` +
+        `💵 **Total payout ${fmt(totalPayout)}**\n` +
+        `Paychecks ${fmt(paycheckTotal)}  •  Reimbursements ${fmt(reimbursementTotal)}\n` +
+        `**${paidCount} of ${payrollEmployees.length} paychecks paid**\n` +
         `Sales ${fmt(grossTotal)}  •  Commission ${fmt(commissionTotal)}\n` +
         `${percentageLabel(commissionRate)} commission → ` +
         `${percentageLabel(paycheckRate)} paycheck  •  Saturday–Friday`
@@ -863,15 +881,16 @@ async function buildFinalPayEmbeds(brand, start, end) {
       .setTimestamp(new Date());
 
     if (!pageEmployees.length) {
-      embed.addFields({ name: 'Employees', value: '_No paid sales were recorded._' });
+      embed.addFields({ name: 'Employees', value: '_No payouts were recorded._' });
     } else {
       embed.addFields(pageEmployees.map(item => {
         const salesLabel = item.sales === 1 ? 'sale' : 'sales';
         const isPaid = paidKeys.has(employeeKey(item.employee));
         return {
-          name: `${isPaid ? '✅' : '◻️'} ${item.employee}  —  ${fmt(item.paycheck)}`.slice(0, 256),
+          name: `${(isPaid || !item.sales) && !item.reimbursement ? '✅' : '◻️'} ${item.employee}  —  ${fmt(item.totalPayout)}`.slice(0, 256),
           value:
-            `${isPaid ? '**PAID**' : '**UNPAID**'}  •  ` +
+            `Paycheck ${fmt(item.paycheck)}${item.sales ? (isPaid ? ' **PAID**' : ' **UNPAID**') : ''}  •  ` +
+            `Reimbursements ${fmt(item.reimbursement)}\n` +
             `${item.sales} ${salesLabel}  •  Sales ${fmt(item.gross)}  •  ` +
             `Commission ${fmt(item.commission)}`,
           inline: false,
@@ -880,8 +899,7 @@ async function buildFinalPayEmbeds(brand, start, end) {
     }
     return embed;
   });
-  const reimbursementEmbeds = await buildReimbursementsOwedEmbeds(brand, end);
-  return [...payrollEmbeds, ...reimbursementEmbeds];
+  return payrollEmbeds;
 }
 
 async function buildPaidChecklistComponents(brand, brandIndex, start, end) {
