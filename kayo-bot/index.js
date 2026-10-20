@@ -66,7 +66,9 @@ const BRANDS = [
     embed_color: '#7D3FD6',
   },
   {
-    name: 'Stay Woke',
+    name: 'Stack & Skillet',
+    // Preserve existing Google Sheets tabs and historical row identifiers.
+    storage_name: 'Stay Woke',
     log_channel_id: '1527125963429777428',
     payouts_channel_id: '1534439033126518795',
     sheet_id: '1pYQuFhLfmUGjlAPX0YY2urJCK9iphkU9HC_iX96ZDx4',
@@ -213,8 +215,12 @@ function safeSheetTitle(value) {
   return value.replace(/[:\\/?*\[\]]/g, '-').slice(0, 100);
 }
 
+function brandStorageName(brand) {
+  return brand.storage_name || brand.name;
+}
+
 function weeklySheetTitle(brand, weekStart) {
-  return safeSheetTitle(`${brand.name}__week_${weekStart.format('YYYY-MM-DD')}`);
+  return safeSheetTitle(`${brandStorageName(brand)}__week_${weekStart.format('YYYY-MM-DD')}`);
 }
 
 class SheetStore {
@@ -299,7 +305,7 @@ class SheetStore {
   async fetchRange(brand, startEpoch, endEpoch) {
     const sheet = await this.weeklySheet(brand, startEpoch);
     const rows = await sheet.getRows();
-    const wantedBrand = brand.name.trim().toLowerCase();
+    const wantedBrand = brandStorageName(brand).trim().toLowerCase();
 
     return rows.flatMap(row => {
       const rowBrand = String(row.get('brand') || '').trim().toLowerCase();
@@ -327,7 +333,7 @@ class SheetStore {
 
   async raffleEntriesSheet(brand) {
     await this.init();
-    const title = safeSheetTitle(`${brand.name}__Raffle_Entries`);
+    const title = safeSheetTitle(`${brandStorageName(brand)}__Raffle_Entries`);
     const headers = [
       'discord_message_id', 'ts_iso', 'ts_epoch', 'brand', 'buyer_name',
       'buyer_id', 'buyer_key', 'item_text', 'tickets', 'source_channel_id',
@@ -344,7 +350,7 @@ class SheetStore {
 
   async raffleTotalsSheet(brand) {
     await this.init();
-    const title = safeSheetTitle(`${brand.name}__Raffle_Totals`);
+    const title = safeSheetTitle(`${brandStorageName(brand)}__Raffle_Totals`);
     const headers = ['buyer_name', 'buyer_key', 'total_tickets', 'last_updated'];
     let sheet = this.doc.sheetsByTitle[title];
     if (!sheet) sheet = await this.doc.addSheet({ title, headerValues: headers });
@@ -390,7 +396,7 @@ class SheetStore {
 
   async reimbursementSheet(brand) {
     await this.init();
-    const title = safeSheetTitle(`${brand.name}__Reimbursements`);
+    const title = safeSheetTitle(`${brandStorageName(brand)}__Reimbursements`);
     const headers = [
       'reimbursement_id', 'ts_iso', 'ts_epoch', 'brand', 'logged_by',
       'logged_by_id', 'employee', 'item', 'quantity', 'unit_price', 'amount',
@@ -421,7 +427,7 @@ class SheetStore {
 
   async reimbursementItemsSheet(brand) {
     await this.init();
-    const title = safeSheetTitle(`${brand.name}__Reimbursement_Items`);
+    const title = safeSheetTitle(`${brandStorageName(brand)}__Reimbursement_Items`);
     const headers = ['item_name', 'unit_price', 'active', 'added_by', 'added_at'];
     let sheet = this.doc.sheetsByTitle[title];
     if (!sheet) sheet = await this.doc.addSheet({ title, headerValues: headers });
@@ -447,7 +453,7 @@ class SheetStore {
   async unpaidReimbursements(brand, endEpoch = Number.POSITIVE_INFINITY) {
     const sheet = await this.reimbursementSheet(brand);
     const rows = await sheet.getRows();
-    const wantedBrand = brand.name.trim().toLowerCase();
+    const wantedBrand = brandStorageName(brand).trim().toLowerCase();
     return rows.flatMap(row => {
       const rowBrand = String(row.get('brand') || '').trim().toLowerCase();
       const status = String(row.get('status') || 'UNPAID').trim().toUpperCase();
@@ -471,7 +477,7 @@ class SheetStore {
 
   async payrollStatusSheet(brand) {
     await this.init();
-    const title = safeSheetTitle(`${brand.name}__Payroll_Status`);
+    const title = safeSheetTitle(`${brandStorageName(brand)}__Payroll_Status`);
     const headers = ['week_start', 'brand', 'employee', 'employee_key', 'paycheck', 'status', 'changed_by', 'changed_at'];
     let sheet = this.doc.sheetsByTitle[title];
     if (!sheet) sheet = await this.doc.addSheet({ title, headerValues: headers });
@@ -694,7 +700,10 @@ const fmt = value => new Intl.NumberFormat('en-US', {
 }).format(value || 0);
 
 function findBrand(name) {
-  return BRANDS.find(brand => brand.name.toLowerCase() === String(name || '').toLowerCase());
+  const wanted = String(name || '').trim().toLowerCase();
+  return BRANDS.find(brand =>
+    brand.name.toLowerCase() === wanted || brandStorageName(brand).toLowerCase() === wanted
+  );
 }
 
 function limitEmbedText(lines, limit = 1024) {
@@ -1201,7 +1210,7 @@ async function createAutomaticShopReimbursement(
     reimbursement_id: reimbursementId,
     ts_iso: timestamp.toISOString(),
     ts_epoch: timestamp.valueOf(),
-    brand: brand.name,
+    brand: brandStorageName(brand),
     logged_by: 'Automatic shop log',
     logged_by_id: '',
     employee: purchase.player,
@@ -1267,7 +1276,7 @@ async function processPaidMessage(message, source = 'live') {
 
       const payoutResult = await storeFor(brand.sheet_id).append(brand, {
         discord_message_id: message.id,
-        brand: brand.name,
+        brand: brandStorageName(brand),
         ts_iso: timestamp.toISOString(),
         ts_epoch: timestamp.valueOf(),
         employee_display: invoicedBy,
@@ -1300,7 +1309,7 @@ async function processPaidMessage(message, source = 'live') {
           discord_message_id: message.id,
           ts_iso: timestamp.toISOString(),
           ts_epoch: timestamp.valueOf(),
-          brand: brand.name,
+          brand: brandStorageName(brand),
           buyer_name: buyer.name,
           buyer_id: buyer.id,
           buyer_key: buyerKey,
@@ -2057,7 +2066,7 @@ client.on('interactionCreate', async interaction => {
         reimbursement_id: reimbursementId,
         ts_iso: timestamp.toISOString(),
         ts_epoch: timestamp.valueOf(),
-        brand: brand.name,
+        brand: brandStorageName(brand),
         logged_by: employee,
         logged_by_id: interaction.user.id,
         employee,
@@ -2137,7 +2146,7 @@ client.on('interactionCreate', async interaction => {
       const reimbursementId = `${timestamp.valueOf()}-${interaction.user.id}`;
       await sheet.addRow({
         reimbursement_id: reimbursementId,
-        ts_iso: timestamp.toISOString(), ts_epoch: timestamp.valueOf(), brand: brand.name,
+        ts_iso: timestamp.toISOString(), ts_epoch: timestamp.valueOf(), brand: brandStorageName(brand),
         logged_by: loggedBy, logged_by_id: interaction.user.id,
         employee,
         item: item.name, quantity, unit_price: item.price, amount,
@@ -2350,7 +2359,7 @@ client.on('interactionCreate', async interaction => {
       const key = employeeKey(item.employee);
       const nextStatus = settingPaid ? 'paid' : 'unpaid';
       await sheet.addRow({
-        week_start: start.format('YYYY-MM-DD'), brand: brand.name,
+        week_start: start.format('YYYY-MM-DD'), brand: brandStorageName(brand),
         employee: item.employee, employee_key: key, paycheck: item.paycheck,
         status: nextStatus, changed_by: interaction.user.id, changed_at: changedAt,
       });
